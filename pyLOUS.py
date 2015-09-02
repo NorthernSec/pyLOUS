@@ -13,6 +13,9 @@ import threading
 import zlib
 import time
 
+# Constants
+max4Bytes=4294967296-1
+
 class LOUS_Sender():
   def __init__(self, chunkSize=8192):
     self.socket=socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -20,15 +23,15 @@ class LOUS_Sender():
     self.seq=0
 
   def send(self, data, address):
-    #TODO: We will have to handle large sequence numbers, exceeding the maximum positive of an int
-    try:
-      chunks = [data[i:i+self.chunkSize] for i in range(0, len(data), self.chunkSize)]
-      for i, chunk in enumerate(chunks):
-        chunk=struct.pack("I",len(data))+struct.pack("I",self.seq)+struct.pack("I",i)+struct.pack("I",len(chunks))+chunk
-        self.socket.sendto(chunk, (address[0], address[1]))
-      self.seq+=1
-    except Exception as e:
-      print(e)
+    chunks = [data[i:i+self.chunkSize] for i in range(0, len(data), self.chunkSize)]
+    if len(chunks) > max4Bytes:
+      raise TooManyFramesException()
+    if seq > max4Bytes:
+      pass # TODO: We will have to figure something out here.
+    for i, chunk in enumerate(chunks):
+      chunk=struct.pack("I",len(data))+struct.pack("I",self.seq)+struct.pack("I",i)+struct.pack("I",len(chunks))+chunk
+      self.socket.sendto(chunk, (address[0], address[1]))
+    self.seq+=1
 
 class LOUS_Receiver(threading.Thread):
   def __init__(self,ip,port, recvFrom=[]):
@@ -102,14 +105,5 @@ class LOUS_Receiver(threading.Thread):
   def stopped(self):
     return self._stop.isSet()
 
-def recvWrapper(sock):
-  recv=sock.recv(4)
-  recv=int.from_bytes(recv,byteorder="little")
-  data=b''
-  while(len(data)<recv):
-    data+=sock.recv(recv)
-  return data
-
-def sendWrapper(sock, data):
-  data=struct.pack("I",len(data))+data
-  sock.sendall(data)
+class TooManyFramesException(Exception):
+  pass
