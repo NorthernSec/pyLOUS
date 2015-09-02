@@ -1,4 +1,4 @@
-import pyLOUS
+from pyLOUS import pyLOUS
 import time
 import os
 
