@@ -41,6 +41,7 @@ class LOUS_Receiver(threading.Thread):
     self.socket=socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     self.compression=compression
     self.data=None
+    self.dataPerIP={}
     self._stop = threading.Event()
     self.running=True
     self.whitelist=recvFrom
@@ -49,8 +50,6 @@ class LOUS_Receiver(threading.Thread):
     #TODO: We will have to handle large sequence numbers, exceeding the maximum positive of an int            (Potential bug)
     #TODO: We will need a scraper to remove old sequence numbers (for example, older then 10 seq numbers ago) (Potential DoS)
     #TODO: We will need a time-based scraper to remove old data                                               (Potential DoS)
-    #TODO: We will need to keep track of which IP an object came from, to make sure we don't mix objects      (bug)
-    #TODO: We might want to concider making an data list instead of object, keeping objects per sender        (enhancement)
     try:
       self.socket.bind((self.ip,self.port))
       chunkBucket={}
@@ -64,21 +63,23 @@ class LOUS_Receiver(threading.Thread):
             chunk=int.from_bytes(data[8:12],byteorder="little")
             chunks=int.from_bytes(data[12:16],byteorder="little")
             payload=data[16:]
-            if not seq in chunkBucket.keys():
-              chunkBucket[seq]={chunk: payload, "len":chunks}
+            if not addr in chunkBucket.keys():
+              chunkBucket[addr]={}
+            if not seq in chunkBucket[addr].keys():
+              chunkBucket[addr][seq]={chunk: payload, "len":chunks}
             else:
-              chunkBucket[seq][chunk]=payload
+              chunkBucket[addr][seq][chunk]=payload
             # Redundancy check
-            if not "len" in chunkBucket[seq].keys():
-              chunkBucket[seq]["len"]=chunks
+            if not "len" in chunkBucket[addr][seq].keys():
+              chunkBucket[addr][seq]["len"]=chunks
             # Is bucket full?
-            if len(chunkBucket[seq])==chunkBucket[seq]["len"]+1:
-              chunkBucket[seq].pop("len")
+            if len(chunkBucket[addr][seq])==chunkBucket[addr][seq]["len"]+1:
+              chunkBucket[addr][seq].pop("len")
               # Rearrange the chunks in order and reconstruct the data
-              data=b''.join([chunkBucket[seq][j] for j in sorted(chunkBucket[seq])])
+              data=b''.join([chunkBucket[addr][seq][j] for j in sorted(chunkBucket[addr][seq])])
               # Remove all previous chunks from list
-              leftover=sorted(chunkBucket)[sorted(chunkBucket).index(seq):]
-              chunkBucket={i:chunkBucket[i] for i in leftover}
+              leftover=sorted(chunkBucket[addr])[sorted(chunkBucket[addr]).index(seq):]
+              chunkBucket[addr]={i:chunkBucket[addr][i] for i in leftover}
               # Decompress if needed
               if self.compression:
                 try:
@@ -86,14 +87,22 @@ class LOUS_Receiver(threading.Thread):
                 except:
                   pass
               self.data=data
+              self.dataPerIP[addr[0]]=data
         except Exception as e:
+          print("Exception")
           print(e)
           pass
     except Exception as e:
       print(e)
 
-  def last(self):
-    return self.data
+  def last(self, IP=None):
+    if IP:
+      if IP in self.dataPerIP:
+        return self.dataPerIP[IP]
+      else:
+        return None
+    else:
+      return self.data
 
   def stop(self):
     self.running=False
