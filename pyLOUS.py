@@ -14,17 +14,14 @@ import zlib
 import time
 
 class LOUS_Sender():
-  def __init__(self, compression=False, chunkSize=8192):
+  def __init__(self, chunkSize=8192):
     self.socket=socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    self.compression=compression
     self.chunkSize=chunkSize
     self.seq=0
 
   def send(self, data, address):
     #TODO: We will have to handle large sequence numbers, exceeding the maximum positive of an int
     try:
-      if self.compression:
-        data = zlib.compress(data)
       chunks = [data[i:i+self.chunkSize] for i in range(0, len(data), self.chunkSize)]
       for i, chunk in enumerate(chunks):
         chunk=struct.pack("I",len(data))+struct.pack("I",self.seq)+struct.pack("I",i)+struct.pack("I",len(chunks))+chunk
@@ -34,12 +31,11 @@ class LOUS_Sender():
       print(e)
 
 class LOUS_Receiver(threading.Thread):
-  def __init__(self,ip,port, compression=False, recvFrom=[]):
+  def __init__(self,ip,port, recvFrom=[]):
     threading.Thread.__init__(self)
     self.ip=ip
     self.port=port
     self.socket=socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    self.compression=compression
     self.data=None
     self.dataPerIP={}
     self._stop = threading.Event()
@@ -80,12 +76,7 @@ class LOUS_Receiver(threading.Thread):
               # Remove all previous chunks from list
               leftover=sorted(chunkBucket[addr])[sorted(chunkBucket[addr]).index(seq):]
               chunkBucket[addr]={i:chunkBucket[addr][i] for i in leftover}
-              # Decompress if needed
-              if self.compression:
-                try:
-                  data = zlib.decompress(data)
-                except:
-                  pass
+              # Save last known good
               self.data=data
               self.dataPerIP[addr[0]]=data
         except Exception as e:
