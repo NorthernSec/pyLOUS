@@ -26,15 +26,15 @@ class LOUS_Sender():
     chunks = [data[i:i+self.chunkSize] for i in range(0, len(data), self.chunkSize)]
     if len(chunks) > max4Bytes:
       raise TooManyFramesException()
-    if seq > max4Bytes:
-      pass # TODO: We will have to figure something out here.
+    if self.seq > max4Bytes:
+      pass # TODO: We will have to figure something out here. Probably overflow to 0000
     for i, chunk in enumerate(chunks):
       chunk=struct.pack("I",len(data))+struct.pack("I",self.seq)+struct.pack("I",i)+struct.pack("I",len(chunks))+chunk
       self.socket.sendto(chunk, (address[0], address[1]))
     self.seq+=1
 
 class LOUS_Receiver(threading.Thread):
-  def __init__(self,ip,port, recvFrom=[]):
+  def __init__(self,ip,port, recvFrom=[], buffer=10):
     threading.Thread.__init__(self)
     self.ip=ip
     self.port=port
@@ -44,10 +44,10 @@ class LOUS_Receiver(threading.Thread):
     self._stop = threading.Event()
     self.running=True
     self.whitelist=recvFrom
+    self.buffer=buffer
 
   def run(self):
     #TODO: We will have to handle large sequence numbers, exceeding the maximum positive of an int            (Potential bug)
-    #TODO: We will need a scraper to remove old sequence numbers (for example, older then 10 seq numbers ago) (Potential DoS)
     #TODO: We will need a time-based scraper to remove old data                                               (Potential DoS)
     try:
       self.socket.bind((self.ip,self.port))
@@ -62,23 +62,40 @@ class LOUS_Receiver(threading.Thread):
             chunk=int.from_bytes(data[8:12],byteorder="little")
             chunks=int.from_bytes(data[12:16],byteorder="little")
             payload=data[16:]
+            # Create bucket if not exists
             if not addr in chunkBucket.keys():
               chunkBucket[addr]={}
-            if not seq in chunkBucket[addr].keys():
-              chunkBucket[addr][seq]={chunk: payload, "len":chunks}
+            # Load bucket for ease of use
+            bucket=chunkBucket[addr]
+            # Store sequence number if not exist
+            if "seq" not in bucket:
+              bucket["seq"]=seq
+            # Check if packet falls outside of our buffer
+            if seq < bucket["seq"]-self.buffer:
+              # TODO: Check if the seq might be an integer overflow
+              # Assuming we send 50 objects/second, the socket can still receive for over 994 days
+
+              # Discard packet
+              continue
+            # Chuck chunk in the right bucket
+            if not seq in bucket.keys():
+              bucket[seq]={chunk: payload, "len":chunks}
             else:
-              chunkBucket[addr][seq][chunk]=payload
+              bucket[seq][chunk]=payload
             # Redundancy check
-            if not "len" in chunkBucket[addr][seq].keys():
-              chunkBucket[addr][seq]["len"]=chunks
+            if not "len" in bucket[seq].keys():
+              bucket[seq]["len"]=chunks
             # Is bucket full?
-            if len(chunkBucket[addr][seq])==chunkBucket[addr][seq]["len"]+1:
-              chunkBucket[addr][seq].pop("len")
+            if len(bucket[seq])==bucket[seq]["len"]+1:
+              bucket[seq].pop("len")
               # Rearrange the chunks in order and reconstruct the data
-              data=b''.join([chunkBucket[addr][seq][j] for j in sorted(chunkBucket[addr][seq])])
-              # Remove all previous chunks from list
-              leftover=sorted(chunkBucket[addr])[sorted(chunkBucket[addr]).index(seq):]
-              chunkBucket[addr]={i:chunkBucket[addr][i] for i in leftover}
+              data=b''.join([bucket[seq][j] for j in sorted(bucket[seq])])
+              # Remove all previous chunks from buffer TODO change
+              # Remove from buffer instead of all
+              tempSeq=bucket.pop("seq")
+              leftover=sorted(bucket)[sorted(bucket).index(seq):]
+              bucket={i:bucket[i] for i in leftover}
+              bucket["seq"]=tempSeq
               # Save last known good
               self.data=data
               self.dataPerIP[addr[0]]=data
