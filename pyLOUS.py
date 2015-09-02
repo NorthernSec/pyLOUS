@@ -46,7 +46,11 @@ class LOUS_Receiver(threading.Thread):
     self.whitelist=recvFrom
 
   def run(self):
-    #TODO: We will have to handle large sequence numbers, exceeding the maximum positive of an int
+    #TODO: We will have to handle large sequence numbers, exceeding the maximum positive of an int            (Potential bug)
+    #TODO: We will need a scraper to remove old sequence numbers (for example, older then 10 seq numbers ago) (Potential DoS)
+    #TODO: We will need a time-based scraper to remove old data                                               (Potential DoS)
+    #TODO: We will need to keep track of which IP an object came from, to make sure we don't mix objects      (bug)
+    #TODO: We might want to concider making an data list instead of object, keeping objects per sender        (enhancement)
     try:
       self.socket.bind((self.ip,self.port))
       chunkBucket={}
